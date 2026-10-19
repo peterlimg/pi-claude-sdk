@@ -51,6 +51,8 @@ Local checks passed on Pi 1.2.0 and 1.3.0. The new RPC driver ran without Pi Rem
 
 That is 36 enumerated cases plus discovery and the recovery journey on each version, not the entire suite or live-model acceptance. The initial discovery assertion incorrectly treated the credential-filtered available list as the registered catalog. It was corrected to observe the public registered catalog without adding fake credentials; the runtime was not changed.
 
+A clean Pi 1.3 project also installed `git:github.com/peterlimg/pi-claude-sdk@v0.1.0` through the normal Pi package command. The installed package autoloaded all three models and both commands with runtime dependencies only, no bundled Pi host peers and no SDK inference. Anonymous downloads of the tagged runtime matched the source hashes. Existing personal settings and the original workspace/installed provider files remained unchanged.
+
 ## Live behavior and remaining limits
 
 Shared real-provider, phone and host checks stay in Pi Remote. Exporting the code does not rerun those journeys or establish full provider parity. See the [shared acceptance contract](https://github.com/peterlimg/pi-remote/blob/607f786dd5da2dd247401c18fc99146cab3a9ad8/docs/provider-parity.md).

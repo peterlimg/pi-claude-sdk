@@ -1,0 +1,49 @@
+{
+  "name": "pi-claude-sdk",
+  "version": "0.1.0",
+  "description": "Claude Agent SDK provider for Pi with Pi-owned tools, permissions and session history",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": { "node": ">=22.19" },
+  "repository": { "type": "git", "url": "git+https://github.com/peterlimg/pi-claude-sdk.git" },
+  "homepage": "https://claude-sdk-in-pi.vercel.app",
+  "bugs": { "url": "https://github.com/peterlimg/pi-claude-sdk/issues" },
+  "keywords": ["pi-package", "claude", "claude-agent-sdk"],
+  "files": ["index.ts", "bridge.ts"],
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "npm run test:discovery && npm run test:recovery && npm run test:prompt && npm run test:malformed && npm run test:cancel && npm run test:tools && npm run test:notices && npm run test:compaction && npm run test:clone && npm run test:fork && npm run test:tree",
+    "test:discovery": "node test/discovery.mjs",
+    "test:recovery": "node test/recovery.mjs",
+    "test:prompt": "node test/prompt.mjs",
+    "test:malformed": "node test/malformed.mjs",
+    "test:cancel": "node test/cancel.mjs",
+    "test:tools": "node test/tools.mjs",
+    "test:notices": "node test/notices.mjs",
+    "test:compaction": "node test/compaction-context.mjs",
+    "test:clone": "node test/clone.mjs",
+    "test:fork": "node test/fork.mjs",
+    "test:tree": "node test/tree.mjs"
+  },
+  "pi": { "extensions": ["./index.ts"] },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.296",
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "zod": "4.6.7"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-agent-core": "1.2.0",
+    "@earendil-works/pi-ai": "1.2.0",
+    "@earendil-works/pi-coding-agent": "1.2.0",
+    "@types/node": "22.15.30",
+    "typebox": "1.3.27",
+    "typescript": "5.8.3"
+  }
+}

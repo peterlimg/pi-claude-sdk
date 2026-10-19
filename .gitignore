@@ -1,0 +1,8 @@
+node_modules/
+*.tgz
+.env
+.env.*
+.pi/
+*.jsonl
+test-results/
+.DS_Store

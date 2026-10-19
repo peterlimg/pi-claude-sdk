@@ -1,0 +1,35 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  replay-e2e:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pi: ['1.2.0', '1.3.0']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - if: matrix.pi != '1.2.0'
+        run: npm install --ignore-scripts --no-save --package-lock=false @earendil-works/pi-agent-core@${{ matrix.pi }} @earendil-works/pi-ai@${{ matrix.pi }} @earendil-works/pi-coding-agent@${{ matrix.pi }}
+      - run: npm run check
+      - run: npm test
+        env:
+          TMPDIR: ${{ runner.temp }}
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: sdk-replay-results-${{ matrix.pi }}
+          path: |
+            ${{ runner.temp }}/pi-sdk-discovery-*/
+            ${{ runner.temp }}/pi-sdk-*-e2e-*/
+            ${{ runner.temp }}/pi-sdk-compaction-context-*/

@@ -540,6 +540,7 @@ function createNativeBridge(cwd: string, createQuery: typeof query, state: Bridg
             replacementSdkId = randomUUID();
             sdkSessionId = sdkMessageId = undefined;
             reported = zeroUsage();
+            toolUpdate = false; // Recovery already rebuilt the full transcript with the current tools.
           } else if (history.length) content = historyContent(history, knownIds, { interruptions: interrupted });
           if (recovering && !isDeepStrictEqual(interrupted, recovery!.interrupted)) fail('SDK recovery tool identities changed.');
           prompt = [...content, ...inputs.length ? inputs.flatMap(message => userContent(message.content)) : [{ type: 'text' as const,

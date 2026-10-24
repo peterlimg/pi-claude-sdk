@@ -9,7 +9,7 @@ The adapter was exported from [Pi Remote at `607f786dd5da2dd247401c18fc99146cab3
 | `index.ts` | `8db9a0f586c6602a16ad9fe16745525a1862a10a296401bf1ce9278f851ae1cb` |
 | `bridge.ts` | `f3c937a8b393ce9515878a807dda9d89d87479a0057edd43636b3cb483fd2101` |
 
-The ten credential-free E2E drivers and their SDK replay fixture came from the same snapshot. Their assertions are unchanged; imports now resolve within this repository. `test/rpc.mjs` is a small, bounded LF-only transport for owned fixture processes, including raw extension dialogs and explicit process-crash checks. It does not import Pi Remote. It is not a replacement for a production RPC client. `test/discovery.mjs` separately loads the actual package and enumerates its registered models and commands without inference. A read-only fixture inspects Pi's public registered catalog; the RPC available-model list is credential-filtered and must stay empty for SDK models in this logged-out test.
+At export, the ten credential-free E2E drivers and their SDK replay fixture came from the same snapshot, with unchanged assertions and imports resolved within this repository. Subsequent failure-recovery changes extend that snapshot as described below. `test/rpc.mjs` is a small, bounded LF-only transport for owned fixture processes, including raw extension dialogs and explicit process-crash checks. It does not import Pi Remote. It is not a replacement for a production RPC client. `test/discovery.mjs` separately loads the actual package and enumerates its registered models and commands without inference. A read-only fixture inspects Pi's public registered catalog; the RPC available-model list is credential-filtered and must stay empty for SDK models in this logged-out test.
 
 Only adapter source, synthetic test source, dependency metadata and documentation were exported. No native transcripts, personal settings, credentials, browser evidence, raw sessions or Pi Remote server code are included. The existing local installation is not switched by this export.
 
@@ -23,6 +23,7 @@ npm run check
 npm run test:discovery
 npm run test:prompt
 npm run test:recovery
+npm run test:retry
 # Or select cases rather than rerunning every scenario:
 npm run test:tree -- selected-history receipt-gap
 ```
@@ -30,6 +31,12 @@ npm run test:tree -- selected-history receipt-gap
 These tests use actual Pi RPC, persistence, the adapter, MCP and tool execution. Only the external SDK peer is replayed. Scratch resources and workers belong to the test. No live Claude request or authentication workaround is involved. Test artifacts are written to temporary directories, not this repository.
 
 `npm test` runs all exported E2Es. CI runs them on Pi 1.2.0 and 1.3.0 with Node 24. This describes the configured checks, not an observed CI result. Local validation should target the affected behavior rather than routinely running the entire suite.
+
+## Failure-recovery contract
+
+`test/retry.mjs` drives actual Pi retries, persisted messages, checkpoints, worker restarts and MCP tool effects. The replay SDK injects a server error or dropped connection after a tool completes. Cases cover bounded automatic retries, exhausted retries followed by a new message, repeated usage denials followed by restored access, older guard errors, worker restarts, and refusals for missing results or an edited checkpoint prefix. Every successful recovery checks that the completed tool ran once, the new context has its own usage baseline, and its checkpoint survives reopening. Original unknown-error assertions in the Stop, notices and recovery journeys now expect a fresh context when receipts are complete; their missing-result guards remain.
+
+These are credential-free replay checks, not evidence of upstream availability, billing reset times, physical-phone behavior or exactly-once execution by a model. Recorded tools are imported as data and their IDs remain protected against reuse. Incomplete or altered history still fails before another SDK request.
 
 ## Export validation
 

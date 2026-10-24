@@ -40,9 +40,9 @@ export default function (pi: ExtensionAPI, createQuery?: Parameters<typeof creat
   let ownerId: string | undefined, ownerCwd: string;
   const borrowed = new Map<string, ReturnType<typeof createBridge>>();
   let promptSource: Pick<BeforeAgentStartEvent, 'systemPrompt' | 'systemPromptOptions'> | undefined;
-  const branchBridge = (ctx: ExtensionContext, saved: Pick<ReturnType<typeof readBranch>, 'checkpoint' | 'recovery' | 'compaction' | 'clone' | 'tree'>,
+  const branchBridge = (ctx: ExtensionContext, saved: Pick<ReturnType<typeof readBranch>, 'checkpoint' | 'recovery' | 'compaction' | 'clone' | 'tree'> & { restart?: boolean },
     entries = () => ctx.sessionManager.getBranch()) => createBridge(ctx.cwd, createQuery, {
-      persistSession: Boolean(ctx.sessionManager.getSessionFile()), checkpoint: saved.checkpoint, recovery: saved.recovery,
+      persistSession: Boolean(ctx.sessionManager.getSessionFile()), restart: saved.restart, checkpoint: saved.checkpoint, recovery: saved.recovery,
       compaction: saved.compaction ? saved.compaction.state ?? null : undefined,
       compactionSource: () => {
         const branch = entries(), end = branch.findIndex(entry => entry.type === 'compaction' && entry.id === saved.compaction?.entryId);
@@ -83,8 +83,9 @@ export default function (pi: ExtensionAPI, createQuery?: Parameters<typeof creat
       onRecoverySession: (id, sdkSessionId) => { pi.appendEntry('claude-sdk-recovery-session', { id, sdkSessionId }); } });
   const restore = (ctx: ExtensionContext) => {
     ownerId = ctx.sessionManager.getSessionId(); ownerCwd = ctx.cwd;
+    const restart = bridge?.closed;
     bridge?.close();
-    bridge = branchBridge(ctx, { checkpoint, recovery, compaction, clone, tree });
+    bridge = branchBridge(ctx, { checkpoint, recovery, compaction, clone, tree, restart });
   };
   const projectionMessages = (branch: SessionEntry[], includeSystem = false): Message[] =>
     convertToLlm(buildSessionProjection(branch).entries.flatMap(entry => entry.messages)).filter(message => includeSystem || message.role !== 'system');
@@ -259,6 +260,7 @@ export default function (pi: ExtensionAPI, createQuery?: Parameters<typeof creat
     if (ctx.model?.provider === providerId && bridge?.closed) restore(ctx);
   });
   pi.on('turn_start', (_event, ctx) => {
+    if (ctx.model?.provider === providerId && bridge?.closed) restore(ctx);
     if (promptSource) promptSource = { systemPrompt: ctx.getSystemPrompt(), systemPromptOptions: promptSource.systemPromptOptions };
   });
   pi.on('agent_settled', (_event, ctx) => {

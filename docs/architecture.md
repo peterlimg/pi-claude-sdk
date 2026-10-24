@@ -25,7 +25,9 @@ Pi owns the audit history. The native SDK context is separate and may be replace
 
 Completed turns save provider-owned checkpoint entries. Pi-owned compaction and independent clone/fork/tree transitions bind their source, destination and configuration through receipts before the next native checkpoint. Historical calls are imported as labeled data, never executable calls. History selection does not reverse filesystem effects.
 
-Recognized recorded Stop boundaries can start a fresh native context when Pi has matching results. Unknown work or missing results remains blocked or requires explicit, checkpoint-bound `/sdk-recover` confirmation. Recovery keeps unknown effects unknown. Changes to the repository name do not change the `claude-sdk` provider ID or checkpoint entry formats.
+Failed requests and recorded Stop boundaries can start a fresh native context when Pi has matching tool results. Pi's existing retry budget and backoff handle transient failures; each attempt replaces a closed bridge rather than using it again. Transport exceptions are classified without exposing their original messages. Usage/entitlement rejections pause without automatic retries and do not prevent a later message from continuing in the same Pi conversation.
+
+Context reconstruction imports history as data, never executable calls, resets the native usage baseline, and validates the saved prefix and configuration before starting the SDK. Missing new tool results still require explicit, checkpoint-bound `/sdk-recover` confirmation. Previously approved unknown effects remain unknown. Native context replacement does not prove a command was rolled back or authorize replaying it. Changes to the repository name do not change the `claude-sdk` provider ID or checkpoint entry formats.
 
 Pi persists checkpoints in saved sessions. Saved SDK chats also have native Claude Code transcripts, normally under `~/.claude/projects/`, subject to Claude Code's retention. Ephemeral requests disable SDK persistence. Deleting a Pi session does not delete its native SDK transcript.
 

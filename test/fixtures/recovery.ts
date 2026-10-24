@@ -64,7 +64,10 @@ function replayQuery(args) {
       const continuation = text.includes('Pi tool-set update.') && request.startsWith('Continue the user request');
       if (continuation || tools.includes('mcp__pi__extra') && ((text.includes('Pi tool-set update.') && text.includes('"text":"dynamic-tools"')) ||
         (text.includes('Pi-authorized context compaction.') && text.includes('"label":"dynamic-tools"')))) request = 'dynamic-tools';
+      const retryCase = process.env.PI_RECOVERY_RETRY_CASE;
+      if (retryCase && request.startsWith('Continue the pending user request')) request = 'sdk-fail';
       log({ type: 'prompt', session, recovered: text.includes('Operator-approved SDK context recovery'),
+        failed: text.includes('Failed SDK continuation.'),
         foreign: text.includes('FOREIGN_DONE'), localRejection: text.includes('SDK history changed after recovery approval. Request recovery again.'),
         marker: text.includes(process.env.PI_RECOVERY_MARKER!), unknown: text.includes('Execution outcome unknown'),
         leakedSignature: text.includes('RECOVERY_PRIVATE_SIGNATURE'), images: content.filter(block => block.type === 'image').length,
@@ -123,6 +126,7 @@ function replayQuery(args) {
       } else {
         let label = text.startsWith('seed') ? 'seed' : text === 'interrupt' ? 'orphan' : text === 'allow-new' ? 'allowed'
           : text === 'deny-new' ? 'policy-denied' : text === 'invalid-new' ? 'invalid' : text === 'after-restart' ? 'after-restart'
+          : retryCase && request === 'sdk-fail' && !previous.some(row => row.type === 'execution' && row.label === 'retry-completed') ? 'retry-completed'
           : request === 'cancel-after-tools' ? 'cancel-completed' : request === 'cancel-in-tool' ? 'cancel-running'
           : request === 'dynamic-tools' && !tools.includes('mcp__pi__extra') ? 'dynamic-tools' : undefined;
         if (label || text === 'reuse-id' || request === 'reuse-seed-id' || request === 'reuse-later-id') {
@@ -154,6 +158,15 @@ function replayQuery(args) {
       if (request === 'assert-extra-disabled') log({ type: 'unavailable',
         listed: (await client.listTools()).tools.map(tool => tool.name),
         allowed: (await args.options.canUseTool('mcp__pi__extra', {}, { toolUseID: randomUUID() })).behavior === 'allow' });
+      if (retryCase && request === 'sdk-fail' && previous.filter(row => row.type === 'retry-failure').length < Number(process.env.PI_RECOVERY_RETRY_FAILURES)) {
+        log({ type: 'retry-failure', mode: retryCase });
+        if (retryCase === 'network') throw new TypeError('fetch failed', { cause: new Error('SYNTHETIC_PRIVATE_DETAIL') });
+        yield { type: 'assistant', uuid: randomUUID(), error: retryCase === 'usage' ? 'unknown' : 'server_error', parent_tool_use_id: null,
+          message: { role: 'assistant', content: [{ type: 'text', text: retryCase === 'usage'
+            ? 'API Error: 400 Third-party apps now draw from extra usage, not plan limits. Ask your workspace admin to add more and keep going. SYNTHETIC_PRIVATE_DETAIL'
+            : 'SYNTHETIC_PRIVATE_DETAIL' }] } };
+        continue;
+      }
       if (request.startsWith('cancel-')) {
         log({ type: 'cancel-ready', request });
         yield wrap({ type: 'message_start', message: { id: randomUUID(), model: args.options.model, usage: { input_tokens: 10, output_tokens: 5 } } });

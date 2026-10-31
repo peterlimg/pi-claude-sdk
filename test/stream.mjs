@@ -1,7 +1,7 @@
 // E2E: real Pi RPC, provider, MCP and tool effects; only the external SDK peer is replayed.
 // Regressions: normalized SDK tool input closed the session; an output-limit stop failed the turn;
 // the default output cap is 128k while checkpoints fingerprinted with the old 16k default still resume;
-// a stalled API stream failed with a non-retryable error instead of Pi retrying the turn.
+// a stalled or broken API stream failed with a non-retryable error instead of Pi retrying the turn.
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -53,14 +53,15 @@ const cases = {
     assert.deepEqual(messages[0].content, [{ type: 'text', text: 'PARTIAL' }]);
     assert.deepEqual(effects, []);
   },
-  'stream-stall': (messages, effects, results, rows) => stalled(messages, effects, results, rows, []),
-  'stream-stall-after-tool': (messages, effects, results, rows) => stalled(messages, effects, results, rows, ['before-stall']),
+  'stream-stall': (messages, effects, results, rows) => stalled(messages, effects, results, rows, [], /stopped mid-stream/),
+  'stream-stall-after-tool': (messages, effects, results, rows) => stalled(messages, effects, results, rows, ['before-stall'], /stopped mid-stream/),
+  'stream-break': (messages, effects, results, rows) => stalled(messages, effects, results, rows, [], /^Incomplete SDK content stream\. .*retry/),
 };
-// A stalled stream fails retryably with its reported usage; Pi's default retry rebuilds the context and finishes the turn.
-function stalled(messages, effects, results, rows, before) {
+// A stalled or otherwise broken stream fails retryably with its reported usage; Pi's default retry rebuilds the context and finishes the turn.
+function stalled(messages, effects, results, rows, before, error) {
   const failed = messages.findIndex(message => message.stopReason === 'error');
   assert.deepEqual(messages.map(message => message.stopReason), [...before.map(() => 'toolUse'), 'error', 'toolUse', 'stop'], JSON.stringify(messages.map(message => message.errorMessage ?? message.stopReason)));
-  assert.match(messages[failed].errorMessage, /stopped mid-stream/);
+  assert.match(messages[failed].errorMessage, error);
   assert.deepEqual([messages[failed].usage.input, messages[failed].usage.output, messages[failed].usage.cacheRead], [7, 3, 900], 'The stalled attempt keeps its reported usage.');
   assert.deepEqual(effects, [...before, 'after-stall'], 'No call from the stalled response may run.');
   assert.deepEqual(results, [{ type: 'result', label: 'after-stall', error: false }]);
@@ -76,7 +77,7 @@ try {
     const rows = records().slice(offset);
     check(assistants(), rows.filter(row => row.type === 'execution').map(row => row.label), rows.filter(row => row.type === 'result'), rows);
     // A stalled stream closes its native session; the retry starts one rebuilt from Pi history.
-    assert.equal(rows.filter(row => row.type === 'query').length, request.startsWith('stream-stall') ? 2 : 1, 'The native SDK session must stay open.');
+    assert.equal(rows.filter(row => row.type === 'query').length, request.startsWith('stream-stall') || request === 'stream-break' ? 2 : 1, 'The native SDK session must stay open.');
     console.log('pass ' + request);
     await stop();
   }

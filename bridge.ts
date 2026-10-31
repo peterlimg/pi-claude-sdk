@@ -11,8 +11,6 @@ import type { BeforeAgentStartEvent } from '@earendil-works/pi-coding-agent';
 import { isRetryableAssistantError } from '@earendil-works/pi-ai/compat';
 
 const SDK_USAGE_RESTRICTION = 'Claude rejected this SDK request with a workspace extra usage restriction. Ask your workspace admin to check SDK entitlement and usage settings.';
-// Pi's retry policy matches "network error"; a retry rebuilds the native context from Pi history.
-const SDK_STREAM_INTERRUPTED = 'The Claude API response stopped mid-stream (stall or lost connection). Claude SDK network error. Try again.';
 const PORTABLE_PROMPT_ERROR = 'Cannot safely preserve the Pi system prompt for this SDK request. Reload extensions or use a fresh session.';
 const INHERITED_PROMPT_ERROR = 'Cannot project an inherited Pi base prompt safely. Required instructions were not removed. Use a portable prompt for this SDK call.';
 const LEGACY_PROMPT_ERROR = 'This conversation uses the previous prompt format. Run /sdk-recover and confirm before continuing.';
@@ -23,6 +21,9 @@ type PromptSource = Pick<BeforeAgentStartEvent, 'systemPrompt' | 'systemPromptOp
 
 class BridgeError extends Error {}
 function fail(message: string): never { throw new BridgeError(message); }
+// A broken SDK stream fails before Pi receives any call from that response, so a retry rebuilt from Pi history is safe.
+// Pi's retry policy matches the suffix.
+function streamBreak(message: string): never { throw new BridgeError(`${message} Nothing from this response ran; please retry your request.`); }
 const zeroUsage = (): Usage => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } });
 const counter = z.number().int().nonnegative();
@@ -642,7 +643,7 @@ function createNativeBridge(cwd: string, createQuery: typeof query, state: Bridg
           options.signal?.throwIfAborted();
           const next = await Promise.race([run.next(), stopped.promise]);
           options.signal?.throwIfAborted();
-          if (next.done) fail('SDK ended before completing a Pi response.');
+          if (next.done) streamBreak('SDK ended before completing a Pi response.');
           const event = next.value;
           await options.onProviderStreamEvent?.(event, model);
           options.signal?.throwIfAborted();
@@ -684,7 +685,7 @@ function createNativeBridge(cwd: string, createQuery: typeof query, state: Bridg
             if (event.parent_tool_use_id) fail('SDK subagent messages are unsupported.');
             const raw = event.event;
             if (raw.type === 'message_start') {
-              if (messageOpen) fail('Overlapping SDK model messages are unsupported.');
+              if (messageOpen) streamBreak('Overlapping SDK model messages are unsupported.');
               if (unqualified.size) fail('SDK did not reject an unqualified tool call.');
               if (malformed.size) fail('SDK did not reject malformed tool arguments.');
               messageOpen = true; blocks.clear(); reason = null;
@@ -694,7 +695,7 @@ function createNativeBridge(cwd: string, createQuery: typeof query, state: Bridg
               if (raw.message.model !== model.id) fail('SDK used an unexpected model.');
             }
             if (raw.type === 'content_block_start') {
-              if (!messageOpen || blocks.has(raw.index)) fail('Malformed SDK content stream.');
+              if (!messageOpen || blocks.has(raw.index)) streamBreak('Malformed SDK content stream.');
               const index = output.content.length;
               const block = raw.content_block;
               if (block.type === 'text') {
@@ -729,7 +730,7 @@ function createNativeBridge(cwd: string, createQuery: typeof query, state: Bridg
             }
             if (raw.type === 'content_block_delta' || raw.type === 'content_block_stop') {
               const state = blocks.get(raw.index);
-              if (!state || state.ended) fail('Malformed SDK content stream.');
+              if (!state || state.ended) streamBreak('Malformed SDK content stream.');
               if (state.internal) {
                 if (raw.type === 'content_block_stop') state.ended = true;
                 else if (raw.delta.type !== 'input_json_delta') fail('Unsupported SDK content delta.');
@@ -779,9 +780,9 @@ function createNativeBridge(cwd: string, createQuery: typeof query, state: Bridg
             if (raw.type === 'message_stop') {
               // The SDK finalizes a stalled or dropped API response itself: it abandons the unfinished block, sends no
               // stop reason and then reports a server error. Fail retryably before publishing any call from it.
-              if ('abandoned_blocks' in event && event.abandoned_blocks) fail(SDK_STREAM_INTERRUPTED);
+              if ('abandoned_blocks' in event && event.abandoned_blocks) streamBreak('The Claude API response stopped mid-stream (stall or lost connection).');
               const open = [...blocks.values()].filter(block => !block.ended);
-              if (!messageOpen || open.length && reason !== 'max_tokens') fail('Incomplete SDK content stream.');
+              if (!messageOpen || open.length && reason !== 'max_tokens') streamBreak('Incomplete SDK content stream.');
               messageOpen = false;
               // An output-limit stop cuts its last block. Close cut text, and drop cut tool calls as the SDK does;
               // they were never published to Pi, and a stray handler call for one gets the malformed-tool error.
@@ -796,7 +797,7 @@ function createNativeBridge(cwd: string, createQuery: typeof query, state: Bridg
               const toolCalls = [...blocks.values()].flatMap(block => block.toolCall ? [block.toolCall] : []);
               if (toolCalls.length) {
                 // The SDK still runs complete calls from an output-limited message, then continues the turn.
-                if (reason !== 'tool_use' && reason !== 'max_tokens' || new Set(toolCalls.map(call => call.id)).size !== toolCalls.length) fail('SDK tool batch was incomplete or truncated.');
+                if (reason !== 'tool_use' && reason !== 'max_tokens' || new Set(toolCalls.map(call => call.id)).size !== toolCalls.length) streamBreak('SDK tool batch was incomplete or truncated.');
                 awaiting = toolCalls.map(call => call.id);
                 // Check ID metadata support; SDK may invoke this batch's handlers sequentially.
                 await Promise.race([Promise.race(awaiting.map(id => calls.get(id)!.ready.promise)), stopped.promise]);
@@ -814,7 +815,7 @@ function createNativeBridge(cwd: string, createQuery: typeof query, state: Bridg
             }
           }
           if (event.type === 'result') {
-            if (messageOpen || awaiting.length) fail('SDK result arrived before completing its message.');
+            if (messageOpen || awaiting.length) streamBreak('SDK result arrived before completing its message.');
             if (unqualified.size) fail('SDK did not reject an unqualified tool call.');
             if (malformed.size) fail('SDK did not reject malformed tool arguments.');
             const totals = zeroUsage();

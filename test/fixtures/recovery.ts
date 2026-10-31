@@ -134,14 +134,15 @@ function replayQuery(args) {
         await pending;
         const result = await call(second, 'wire-\uFEFF');
         log({ type: 'result', label: 'normalized', error: result.isError === true });
-      } else if (request === 'stream-stall' || text.includes('stream-stall-after-tool')) {
+      } else if (request === 'stream-stall' || request === 'stream-break' || text.includes('stream-stall-after-tool')) {
         // On a stalled API stream the SDK abandons the unfinished block, sends message_stop without message_delta,
         // then a synthetic server error. The complete call before it has already been dispatched.
-        const variant = request === 'stream-stall' ? 'first' : 'after-tool', stalled = previous.some(row => row.type === 'stall' && row.variant === variant), call = label => {
+        // stream-break ends the same way without those SDK markers: any unrecognized early end.
+        const variant = text.includes('stream-stall-after-tool') ? 'after-tool' : request, stalled = previous.some(row => row.type === 'stall' && row.variant === variant), call = label => {
           const id = 'toolu_' + randomUUID();
           return { id, pending: client.callTool({ name: 'probe', arguments: { label }, _meta: { 'claudecode/toolUseId': id } }) };
         };
-        if (!stalled && request !== 'stream-stall') {
+        if (!stalled && variant === 'after-tool') {
           const { id, pending } = call('before-stall');
           yield* assistant(args.options.model, [{ type: 'tool_use', id, name: 'mcp__pi__probe', input: { label: 'before-stall' } }], 'tool_use');
           await pending;
@@ -157,6 +158,7 @@ function replayQuery(args) {
           yield wrap({ type: 'content_block_stop', index: 0 });
           yield wrap({ type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'toolu_' + randomUUID(), name: 'mcp__pi__probe', input: {} } });
           yield wrap({ type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"label":"cu' } });
+          if (variant === 'stream-break') { yield wrap({ type: 'message_stop' }); continue; }
           yield { ...wrap({ type: 'message_stop' }), abandoned_blocks: { api_message_id: message, from_block_index: 1 } };
           yield { type: 'assistant', uuid: randomUUID(), error: 'server_error', parent_tool_use_id: null, message: { role: 'assistant', model: '<synthetic>',
             content: [{ type: 'text', text: 'API Error: The response stopped arriving. The response above may be incomplete.' }] } };

@@ -11,6 +11,8 @@ import type { BeforeAgentStartEvent } from '@earendil-works/pi-coding-agent';
 import { isRetryableAssistantError } from '@earendil-works/pi-ai/compat';
 
 const SDK_USAGE_RESTRICTION = 'Claude rejected this SDK request with a workspace extra usage restriction. Ask your workspace admin to check SDK entitlement and usage settings.';
+// Pi's retry policy matches "network error"; a retry rebuilds the native context from Pi history.
+const SDK_STREAM_INTERRUPTED = 'The Claude API response stopped mid-stream (stall or lost connection). Claude SDK network error. Try again.';
 const PORTABLE_PROMPT_ERROR = 'Cannot safely preserve the Pi system prompt for this SDK request. Reload extensions or use a fresh session.';
 const INHERITED_PROMPT_ERROR = 'Cannot project an inherited Pi base prompt safely. Required instructions were not removed. Use a portable prompt for this SDK call.';
 const LEGACY_PROMPT_ERROR = 'This conversation uses the previous prompt format. Run /sdk-recover and confirm before continuing.';
@@ -539,7 +541,8 @@ function createNativeBridge(cwd: string, createQuery: typeof query, state: Bridg
           if (!run && !recovering && (state.restart || !inputs.length || restartableSdkMessages(history).size || history.some(message =>
             message.role === 'assistant' && message.provider === 'claude-sdk' && message.api === 'claude-sdk' && message.stopReason === 'error'))) {
             // Replace the native context, never its recorded tool effects or missing receipts.
-            content = historyContent(conversation.slice(0, conversation.length - inputs.length), new Set(), { trustedPrefix: prefix.length, handoff: 'retry' });
+            // A retried first response has no earlier history; its native context is the pending input alone.
+            if (conversation.length > inputs.length) content = historyContent(conversation.slice(0, conversation.length - inputs.length), new Set(), { trustedPrefix: prefix.length, handoff: 'retry' });
             replacementSdkId = randomUUID();
             sdkSessionId = sdkMessageId = undefined;
             reported = zeroUsage();
@@ -774,6 +777,9 @@ function createNativeBridge(cwd: string, createQuery: typeof query, state: Bridg
               output.usage = rawUsage(currentUsage, model);
             }
             if (raw.type === 'message_stop') {
+              // The SDK finalizes a stalled or dropped API response itself: it abandons the unfinished block, sends no
+              // stop reason and then reports a server error. Fail retryably before publishing any call from it.
+              if ('abandoned_blocks' in event && event.abandoned_blocks) fail(SDK_STREAM_INTERRUPTED);
               const open = [...blocks.values()].filter(block => !block.ended);
               if (!messageOpen || open.length && reason !== 'max_tokens') fail('Incomplete SDK content stream.');
               messageOpen = false;

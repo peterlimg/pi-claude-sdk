@@ -134,6 +134,36 @@ function replayQuery(args) {
         await pending;
         const result = await call(second, 'wire-\uFEFF');
         log({ type: 'result', label: 'normalized', error: result.isError === true });
+      } else if (request === 'stream-stall' || text.includes('stream-stall-after-tool')) {
+        // On a stalled API stream the SDK abandons the unfinished block, sends message_stop without message_delta,
+        // then a synthetic server error. The complete call before it has already been dispatched.
+        const variant = request === 'stream-stall' ? 'first' : 'after-tool', stalled = previous.some(row => row.type === 'stall' && row.variant === variant), call = label => {
+          const id = 'toolu_' + randomUUID();
+          return { id, pending: client.callTool({ name: 'probe', arguments: { label }, _meta: { 'claudecode/toolUseId': id } }) };
+        };
+        if (!stalled && request !== 'stream-stall') {
+          const { id, pending } = call('before-stall');
+          yield* assistant(args.options.model, [{ type: 'tool_use', id, name: 'mcp__pi__probe', input: { label: 'before-stall' } }], 'tool_use');
+          await pending;
+        }
+        const label = stalled ? 'after-stall' : 'stalled', { id, pending } = call(label);
+        if (!stalled) {
+          log({ type: 'stall', variant });
+          void pending.then(result => log({ type: 'stall-handler', error: result.isError === true }), () => log({ type: 'stall-handler', error: true }));
+          const message = randomUUID();
+          yield wrap({ type: 'message_start', message: { id: message, model: args.options.model, usage: { input_tokens: 7, output_tokens: 3, cache_read_input_tokens: 900 } } });
+          yield wrap({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id, name: 'mcp__pi__probe', input: {} } });
+          yield wrap({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: JSON.stringify({ label }) } });
+          yield wrap({ type: 'content_block_stop', index: 0 });
+          yield wrap({ type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'toolu_' + randomUUID(), name: 'mcp__pi__probe', input: {} } });
+          yield wrap({ type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"label":"cu' } });
+          yield { ...wrap({ type: 'message_stop' }), abandoned_blocks: { api_message_id: message, from_block_index: 1 } };
+          yield { type: 'assistant', uuid: randomUUID(), error: 'server_error', parent_tool_use_id: null, message: { role: 'assistant', model: '<synthetic>',
+            content: [{ type: 'text', text: 'API Error: The response stopped arriving. The response above may be incomplete.' }] } };
+          continue;
+        }
+        yield* assistant(args.options.model, [{ type: 'tool_use', id, name: 'mcp__pi__probe', input: { label } }], 'tool_use');
+        log({ type: 'result', label, error: (await pending).isError === true });
       } else if (request === 'stream-max-tokens') {
         // Output limit cuts a tool call; the SDK drops it and still runs the complete call before it.
         const id = 'toolu_' + randomUUID(), pending = client.callTool({ name: 'probe', arguments: { label: 'complete' }, _meta: { 'claudecode/toolUseId': id } });

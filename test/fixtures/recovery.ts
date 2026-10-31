@@ -42,6 +42,7 @@ function replayQuery(args) {
   const sdkPrompt = typeof args.options.systemPrompt === 'string' ? args.options.systemPrompt : args.options.systemPrompt?.append ?? '';
   const piDocs = sdkPrompt.includes('providers (docs/custom-provider.md)') && sdkPrompt.includes('pi packages (docs/packages.md)');
   log({ type: 'query', session, resumed: Boolean(args.options.resume), resumedAt: Boolean(args.options.resumeSessionAt), invalidInit,
+    outputCap: args.options.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS, sdkSystemPrompt: args.options.systemPrompt,
     portable: args.options.systemPrompt?.preset === 'claude_code', piDocs,
     globalPolicy: sdkPrompt.includes('PORTABLE_GLOBAL_POLICY'), projectPolicy: sdkPrompt.includes('PORTABLE_PROJECT_POLICY'),
     skill: sdkPrompt.includes('PORTABLE_SKILL'), append: sdkPrompt.includes('PORTABLE_APPEND'),

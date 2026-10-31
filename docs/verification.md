@@ -42,6 +42,8 @@ These are credential-free replay checks, not evidence of upstream availability, 
 
 `test/stream.mjs` replays two Claude Code behaviors seen in live runs. Claude Code may normalize tool input before MCP dispatch, for example by turning a literal `﻿` escape into a BOM character. Pi executes the streamed wire input, and the handler matches by tool-call ID and name. An output-limit stop (`max_tokens`) can cut the last content block. The cut text is kept and the turn reports `length`. A cut tool call is dropped, as Claude Code drops it, while complete calls in the same message still run once.
 
+The `output-cap` case covers the default output cap. A new session asks Claude Code for 128k output tokens, which Claude Code clamps to the model's limit. A fingerprint still records only a cap that Pi requested. Without one, it stores the earlier 16k default, so checkpoints saved before the change resume their native session. The case resumes from a checkpoint fingerprinted with that 16k default.
+
 ## Export validation
 
 Local checks passed on Pi 1.2.0 and 1.3.0. The new RPC driver ran without Pi Remote's worker flag or server code. Strict TypeScript and JavaScript syntax checks passed.

@@ -424,7 +424,7 @@ function createNativeBridge(cwd: string, createQuery: typeof query, state: Bridg
         const effort: EffortLevel = options.reasoning === 'minimal' || !options.reasoning ? 'low' : options.reasoning;
         if (!['low', 'medium', 'high', 'xhigh', 'max'].includes(effort)) fail('Unsupported Claude SDK thinking effort.');
         const enabled = Boolean(options.reasoning);
-        const maxTokens = options.maxTokens ?? Math.min(model.maxTokens, 16000);
+        const maxTokens = options.maxTokens ?? Math.min(model.maxTokens, 128000);
         if (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > model.maxTokens) fail('Invalid Claude SDK output token limit.');
         const env = sdkEnvironment(options.env);
         const tools = options.toolChoice === 'none' ? [] : getCurrentTools(context.messages);
@@ -435,7 +435,8 @@ function createNativeBridge(cwd: string, createQuery: typeof query, state: Bridg
         if (state.promptSource && !source) fail(PORTABLE_PROMPT_ERROR);
         const sdkSystemPrompt = projectSdkPrompt(context.messages, tools, source);
         // SDK adds process markers after startup; explicit overrides define the live query's configuration.
-        const configSource = { cwd, sessionId: options.sessionId, systemPrompt, tools, env: options.env, maxTokens };
+        // Fingerprints record the requested cap. The default keeps its pre-128k entry so saved checkpoints still resume.
+        const configSource = { cwd, sessionId: options.sessionId, systemPrompt, tools, env: options.env, maxTokens: options.maxTokens ?? Math.min(model.maxTokens, 16000) };
         const legacyConfig = hash(JSON.stringify(configSource));
         const config = state.promptSource ? hash(JSON.stringify({ ...configSource, sdkSystemPrompt })) : legacyConfig;
         const conversation = context.messages.filter(message => message.role !== 'system');

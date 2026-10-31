@@ -38,6 +38,10 @@ These tests use actual Pi RPC, persistence, the adapter, MCP and tool execution.
 
 These are credential-free replay checks, not evidence of upstream availability, billing reset times, physical-phone behavior or exactly-once execution by a model. Recorded tools are imported as data and their IDs remain protected against reuse. Incomplete or altered history still fails before another SDK request.
 
+## SDK stream contract
+
+`test/stream.mjs` replays two Claude Code behaviors seen in live runs. Claude Code may normalize tool input before MCP dispatch, for example by turning a literal `﻿` escape into a BOM character. Pi executes the streamed wire input, and the handler matches by tool-call ID and name. An output-limit stop (`max_tokens`) can cut the last content block. The cut text is kept and the turn reports `length`. A cut tool call is dropped, as Claude Code drops it, while complete calls in the same message still run once.
+
 ## Export validation
 
 Local checks passed on Pi 1.2.0 and 1.3.0. The new RPC driver ran without Pi Remote's worker flag or server code. Strict TypeScript and JavaScript syntax checks passed.

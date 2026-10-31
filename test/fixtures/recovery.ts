@@ -14,7 +14,7 @@ const wrap = event => ({ type: 'stream_event', parent_tool_use_id: null, event }
 async function* assistant(model, blocks, stop = 'end_turn', inputTokens = 10) {
   yield wrap({ type: 'message_start', message: { id: randomUUID(), model, usage: { input_tokens: inputTokens, output_tokens: 5 } } });
   for (const [index, block] of blocks.entries()) {
-    const { json, earlyReceipt, ...contentBlock } = block;
+    const { json, earlyReceipt, truncated, ...contentBlock } = block;
     yield wrap({ type: 'content_block_start', index, content_block: block.type === 'tool_use' ? { ...contentBlock, input: {} }
       : block.type === 'thinking' ? { type: 'thinking', thinking: '', signature: '' } : { type: 'text', text: '' } });
     if (block.type === 'tool_use') yield wrap({ type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: json ?? JSON.stringify(block.input) } });
@@ -26,7 +26,7 @@ async function* assistant(model, blocks, stop = 'end_turn', inputTokens = 10) {
       { type: 'tool_result', tool_use_id: block.id, is_error: true, content: 'Tool input could not be parsed as JSON.' },
     ] } };
     if (json !== undefined) await setImmediate();
-    yield wrap({ type: 'content_block_stop', index });
+    if (!truncated) yield wrap({ type: 'content_block_stop', index });
   }
   yield wrap({ type: 'message_delta', delta: { stop_reason: stop }, usage: { output_tokens: 5 } });
   yield wrap({ type: 'message_stop' });
@@ -123,6 +123,23 @@ function replayQuery(args) {
           if (mixed) await mixed;
         }
         if (mode !== 'mixed') yield* valid('after-malformed', mode === 'duplicate' ? badId : undefined);
+      } else if (request === 'stream-normalized') {
+        // Claude Code dispatches its normalized copy of tool input; later batch handlers start after earlier results.
+        const first = 'toolu_' + randomUUID(), second = 'toolu_' + randomUUID();
+        const call = (id, label) => client.callTool({ name: 'probe', arguments: { label }, _meta: { 'claudecode/toolUseId': id } });
+        const pending = call(first, 'wire-first');
+        yield* assistant(args.options.model, [{ type: 'tool_use', id: first, name: 'mcp__pi__probe', input: { label: 'wire-first' } },
+          { type: 'tool_use', id: second, name: 'mcp__pi__probe', input: { label: 'wire-\\uFEFF' } }], 'tool_use');
+        await pending;
+        const result = await call(second, 'wire-\uFEFF');
+        log({ type: 'result', label: 'normalized', error: result.isError === true });
+      } else if (request === 'stream-max-tokens') {
+        // Output limit cuts a tool call; the SDK drops it and still runs the complete call before it.
+        const id = 'toolu_' + randomUUID(), pending = client.callTool({ name: 'probe', arguments: { label: 'complete' }, _meta: { 'claudecode/toolUseId': id } });
+        yield* assistant(args.options.model, [{ type: 'text', text: 'Writing files.' }, { type: 'tool_use', id, name: 'mcp__pi__probe', input: { label: 'complete' } },
+          { type: 'tool_use', id: 'toolu_' + randomUUID(), name: 'mcp__pi__probe', input: {}, json: '{"label":"cut', truncated: true }], 'max_tokens');
+        const result = await pending;
+        log({ type: 'result', label: 'complete', error: result.isError === true });
       } else {
         let label = text.startsWith('seed') ? 'seed' : text === 'interrupt' ? 'orphan' : text === 'allow-new' ? 'allowed'
           : text === 'deny-new' ? 'policy-denied' : text === 'invalid-new' ? 'invalid' : text === 'after-restart' ? 'after-restart'
@@ -175,7 +192,9 @@ function replayQuery(args) {
         await delay(30000, undefined, { signal: args.options.abortController.signal });
       }
       if (contextTest) memory = [...text.matchAll(/PI_(?:COMPACTION|CLONE)_[a-f0-9-]+/g)].at(-1)?.[0] ?? memory;
-      yield* assistant(args.options.model, [{ type: 'text', text: summaryRequest
+      const cutText = request === 'stream-max-tokens-text';
+      if (cutText) yield* assistant(args.options.model, [{ type: 'text', text: 'PARTIAL', truncated: true }], 'max_tokens');
+      else yield* assistant(args.options.model, [{ type: 'text', text: summaryRequest
         ? memory ? `## Goal\nRemember ${memory}.\n## Progress\nThe probe already completed. Never repeat recorded work.\n## Next steps\nContinue the current user request.`
           : '## Pending request\nContinue the latest user request. No additional tool work is required.'
         : contextTest && request.includes('recall') ? memory ?? 'MISSING_MARKER'
@@ -184,7 +203,7 @@ function replayQuery(args) {
       yield { type: 'assistant', uuid: randomUUID() };
       turn++;
       log({ type: 'native-complete', session, turn, ...(contextTest ? { memory } : {}) });
-      yield { type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn', user_message_uuids: [next.value.uuid], total_cost_usd: turn * 0.01,
+      yield { type: 'result', subtype: 'success', is_error: false, stop_reason: cutText ? 'max_tokens' : 'end_turn', user_message_uuids: [next.value.uuid], total_cost_usd: turn * 0.01,
         modelUsage: { [args.options.model]: { inputTokens: turn * 100, outputTokens: turn * 40, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 } } };
     }
   })();

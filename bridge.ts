@@ -226,7 +226,6 @@ export function sdkEnvironment(overrides: Record<string, string> = {}) {
 
 type Pending = {
   name: string;
-  args: Record<string, unknown>;
   task: ReturnType<typeof Promise.withResolvers<CallToolResult>>;
   handlerStarted: boolean;
   ready: ReturnType<typeof Promise.withResolvers<void>>;
@@ -369,13 +368,16 @@ function createNativeBridge(cwd: string, createQuery: typeof query, state: Bridg
     wake?.();
     return uuid;
   }
-  function remember(id: string, name: string, args: Record<string, unknown>) {
+  // Claude Code normalizes tool input before MCP dispatch (it keeps separate wire and displayed copies), so
+  // handler arguments can differ from the streamed JSON. Pi executes the streamed wire input, which the SDK also
+  // replays to the model; the call identity is its ID and tool name.
+  function remember(id: string, name: string) {
     const previous = calls.get(id);
     if (previous) {
-      if (previous.name !== name || !isDeepStrictEqual(previous.args, args)) fail('SDK tool-call identity mismatch.');
+      if (previous.name !== name) fail('SDK tool-call identity mismatch.');
       return previous;
     }
-    const entry = { name, args, task: Promise.withResolvers<CallToolResult>(), handlerStarted: false, ready: Promise.withResolvers<void>() };
+    const entry = { name, task: Promise.withResolvers<CallToolResult>(), handlerStarted: false, ready: Promise.withResolvers<void>() };
     calls.set(id, entry);
     return entry;
   }
@@ -582,7 +584,7 @@ function createNativeBridge(cwd: string, createQuery: typeof query, state: Bridg
             }
             if ((issued.has(id) || retired.has(id)) && !calls.has(id)) return malformedTool();
             try {
-              const entry = remember(id, request.params.name, request.params.arguments ?? {});
+              const entry = remember(id, request.params.name);
               if (entry.handlerStarted) { close(); return stoppedTool(); }
               entry.handlerStarted = true;
               entry.ready.resolve();
@@ -761,7 +763,7 @@ function createNativeBridge(cwd: string, createQuery: typeof query, state: Bridg
                   if (!block.arguments || typeof block.arguments !== 'object' || Array.isArray(block.arguments)) fail('Malformed SDK tool arguments.');
                   if (issued.has(block.id) || retired.has(block.id)) fail('SDK repeated a previously issued tool-call ID.');
                   issued.add(block.id);
-                  remember(block.id, block.name, block.arguments);
+                  remember(block.id, block.name);
                 }
               }
             }
@@ -771,11 +773,23 @@ function createNativeBridge(cwd: string, createQuery: typeof query, state: Bridg
               output.usage = rawUsage(currentUsage, model);
             }
             if (raw.type === 'message_stop') {
-              if (!messageOpen || [...blocks.values()].some(block => !block.ended)) fail('Incomplete SDK content stream.');
+              const open = [...blocks.values()].filter(block => !block.ended);
+              if (!messageOpen || open.length && reason !== 'max_tokens') fail('Incomplete SDK content stream.');
               messageOpen = false;
+              // An output-limit stop cuts its last block. Close cut text, and drop cut tool calls as the SDK does;
+              // they were never published to Pi, and a stray handler call for one gets the malformed-tool error.
+              for (const block of open) {
+                block.ended = true;
+                const content = output.content[block.index];
+                if (block.toolCall) { issued.add(block.toolCall.id); block.toolCall = undefined; }
+                else if (block.internal) continue;
+                else if (content.type === 'text') stream.push({ type: 'text_end', contentIndex: block.index, content: content.text, partial: output });
+                else if (content.type === 'thinking') stream.push({ type: 'thinking_end', contentIndex: block.index, content: content.thinking, partial: output });
+              }
               const toolCalls = [...blocks.values()].flatMap(block => block.toolCall ? [block.toolCall] : []);
               if (toolCalls.length) {
-                if (reason !== 'tool_use' || new Set(toolCalls.map(call => call.id)).size !== toolCalls.length) fail('SDK tool batch was incomplete or truncated.');
+                // The SDK still runs complete calls from an output-limited message, then continues the turn.
+                if (reason !== 'tool_use' && reason !== 'max_tokens' || new Set(toolCalls.map(call => call.id)).size !== toolCalls.length) fail('SDK tool batch was incomplete or truncated.');
                 awaiting = toolCalls.map(call => call.id);
                 // Check ID metadata support; SDK may invoke this batch's handlers sequentially.
                 await Promise.race([Promise.race(awaiting.map(id => calls.get(id)!.ready.promise)), stopped.promise]);

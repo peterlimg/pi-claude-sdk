@@ -26,8 +26,9 @@ const result = { fixture: 'real Pi RPC, runtime tool selection, provider, MCP an
   piVersion: execFileSync(process.execPath, [cli, '--version'], { encoding: 'utf8' }).trim(), cases: [], pass: false };
 let worker, settled = 0;
 async function start() {
+  const sdkModel = ['model-switch', 'prompt-switch'].includes(process.env.PI_RECOVERY_TOOL_CASE) ? 'claude-opus-5-5' : 'claude-haiku-5-5';
   worker = new RpcWorker(process.env.PI_RECOVERY_SESSION, project, { bin: process.execPath, prefix: [cli, '-ne', '-ns', '-np', '-nc', '--no-mcp', '--tools', 'probe,extra',
-    '-e', fileURLToPath(new URL('./fixtures/recovery.ts', import.meta.url)), '--model', 'claude-sdk/claude-haiku-5-5', '--thinking', 'max'] });
+    '-e', fileURLToPath(new URL('./fixtures/recovery.ts', import.meta.url)), '--model', 'claude-sdk/' + sdkModel, '--thinking', 'max'] });
   worker.on('event', event => { if (event.type === 'agent_settled') settled++; });
   await worker.request('get_state');
 }
@@ -40,35 +41,49 @@ async function send(message) {
 }
 console.log('Evidence: ' + evidence);
 try {
-  for (const mode of process.argv.slice(2).length ? process.argv.slice(2) : ['prompt-reload', 'prompt-live', 'first', 'checkpoint', 'restart', 'remove', 'stop', 'old-guard', 'queued-input', 'permission', 'validation', 'environment', 'instructions', 'missing-result', 'history', 'reorder', 'reorder-override', 'reorder-override-drop', 'reorder-content']) {
+  for (const mode of process.argv.slice(2).length ? process.argv.slice(2) : ['model-switch', 'prompt-switch', 'prompt-reload', 'prompt-live', 'first', 'checkpoint', 'restart', 'remove', 'stop', 'old-guard', 'queued-input', 'permission', 'validation', 'environment', 'instructions', 'missing-result', 'history', 'reorder', 'reorder-override', 'reorder-override-drop', 'reorder-content']) {
     result.stage = mode;
     process.env.PI_RECOVERY_TOOL_CASE = mode; process.env.PI_RECOVERY_REORDER = ''; process.env.PI_RECOVERY_PROMPT_UPDATE = '';
     process.env.PI_RECOVERY_SESSION = join(evidence, mode + '.jsonl');
     writeFileSync(process.env.PI_RECOVERY_SESSION, JSON.stringify({ type: 'session', version: 3, id: randomUUID(), timestamp: new Date().toISOString(), cwd: project }) + '\n');
     const offset = records().length, current = () => records().slice(offset), effects = () => current().filter(row => row.type === 'execution').map(row => row.label);
     await start();
-    if (mode.startsWith('prompt-')) {
+    if (mode.startsWith('prompt-') || mode === 'model-switch') {
       assert.equal((await send('seed')).stopReason, 'stop');
       if (mode === 'prompt-reload') {
         await worker.close(); worker = undefined;
         process.env.PI_RECOVERY_PROMPT_UPDATE = '1'; await start();
-      } else await worker.request('prompt', { message: '/sdk-change-prompt' });
+      } else {
+        if (mode !== 'model-switch') await worker.request('prompt', { message: '/sdk-change-prompt' });
+        if (mode === 'model-switch' || mode === 'prompt-switch') {
+          const messages = entries().filter(row => row.type === 'message');
+          await worker.request('set_model', { provider: 'openai-codex', modelId: 'gpt-6.1-sol' });
+          await worker.request('set_model', { provider: 'claude-sdk', modelId: 'claude-opus-5-5' });
+          assert.deepEqual(entries().filter(row => row.type === 'message'), messages, 'Switching models without a prompt must not add conversation messages.');
+          assert.equal(current().filter(row => row.type === 'query').length, 1, 'Switching models must not start an SDK request.');
+        }
+      }
       const response = await send('followup');
       assert.equal(response.stopReason, 'stop', response.errorMessage);
       const queries = current().filter(row => row.type === 'query');
       assert.equal(queries.length, 2);
-      assert.equal(queries[1].resumed, false); assert.equal(queries[1].resumedAt, false);
-      assert.match(queries[1].sdkSystemPrompt.append, /UPDATED_RULES/);
-      assert.match(queries[1].sdkSystemPrompt.append, /UPDATED_MCP_ROUTING/);
-      assert(current().some(row => row.type === 'prompt' && row.marker));
+      const changed = mode !== 'model-switch';
+      assert.equal(queries[1].resumed, !changed); assert.equal(queries[1].resumedAt, !changed);
+      assert.equal(queries[1].session === queries[0].session, !changed);
+      if (changed) {
+        assert.match(queries[1].sdkSystemPrompt.append, /UPDATED_RULES/);
+        assert.match(queries[1].sdkSystemPrompt.append, /UPDATED_MCP_ROUTING/);
+        assert(current().some(row => row.type === 'prompt' && row.marker));
+      }
       assert.equal((await send('followup')).stopReason, 'stop');
       assert.deepEqual(effects(), ['seed']);
       assert.equal(current().filter(row => row.type === 'query').length, 2);
-      await worker.close(); worker = undefined; process.env.PI_RECOVERY_PROMPT_UPDATE = '1'; await start();
+      await worker.close(); worker = undefined; process.env.PI_RECOVERY_PROMPT_UPDATE = changed ? '1' : ''; await start();
       assert.equal((await send('followup')).stopReason, 'stop');
       assert.equal(current().filter(row => row.type === 'query').at(-1).resumed, true);
       assert.deepEqual(effects(), ['seed']);
-      result.cases.push({ mode, pass: true, freshContext: true, instructionsPreserved: true, durableResume: true, noReplay: true });
+      assert(!current().some(row => row.type === 'sol-request'), 'Selecting Sol without a prompt must never send it a request.');
+      result.cases.push({ mode, pass: true, freshContext: changed, instructionsPreserved: true, durableResume: true, noReplay: true });
       await worker.close(); worker = undefined; continue;
     }
     if (mode.startsWith('reorder')) {

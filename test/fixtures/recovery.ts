@@ -250,6 +250,7 @@ export default function (pi) {
   pi.on('project_trust', () => ({ trusted: 'yes' }));
   const { compat: _compat, ...metadata } = getBuiltinModels('anthropic').find(model => model.id === 'claude-haiku-5-5');
   const controlStream = (model, context) => {
+    if (model.provider === 'openai-codex') log({ type: 'sol-request' });
     const summary = Boolean(process.env.PI_RECOVERY_COMPACTION && getCurrentTools(context.messages).length === 0);
     const summaryMarker = summary && JSON.stringify(context.messages).match(/PI_COMPACTION_[a-f0-9-]+/)?.[0];
     if (summary) log({ type: 'control-compaction', marker: Boolean(summaryMarker) });
@@ -271,6 +272,12 @@ export default function (pi) {
     auth: { apiKey: { name: 'Replay control', resolve: async () => ({ auth: {}, source: 'isolated replay' }) } },
     models: [{ ...metadata, provider: 'recovery-control', api: 'recovery-control', id: 'plain', name: 'Recovery control' }],
     api: { stream: controlStream, streamSimple: controlStream } }));
+  if (['model-switch', 'prompt-switch'].includes(process.env.PI_RECOVERY_TOOL_CASE!)) {
+    pi.registerProvider(createProvider({ id: 'openai-codex', name: 'Isolated Sol selection',
+      auth: { apiKey: { name: 'Replay Sol', resolve: async () => ({ auth: {}, source: 'isolated replay' }) } },
+      models: [getBuiltinModels('openai-codex').find(model => model.id === 'gpt-6.1-sol')!],
+      api: { stream: controlStream, streamSimple: controlStream } }));
+  }
   // Test authentication only; no native CLI or model service is used by this peer.
   localLogin.resolve = async () => ({ auth: {}, source: 'isolated SDK replay',
     ...(['environment', 'old-guard'].includes(process.env.PI_RECOVERY_TOOL_CASE!) ? { env: { PI_SYNTHETIC_SDK_SCOPE: process.env.PI_RECOVERY_REQUEST_SCOPE ?? 'base' } } : {}) });

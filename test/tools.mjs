@@ -40,13 +40,37 @@ async function send(message) {
 }
 console.log('Evidence: ' + evidence);
 try {
-  for (const mode of process.argv.slice(2).length ? process.argv.slice(2) : ['first', 'checkpoint', 'restart', 'remove', 'stop', 'old-guard', 'queued-input', 'permission', 'validation', 'environment', 'instructions', 'missing-result', 'history', 'reorder', 'reorder-override', 'reorder-override-drop', 'reorder-content']) {
+  for (const mode of process.argv.slice(2).length ? process.argv.slice(2) : ['prompt-reload', 'prompt-live', 'first', 'checkpoint', 'restart', 'remove', 'stop', 'old-guard', 'queued-input', 'permission', 'validation', 'environment', 'instructions', 'missing-result', 'history', 'reorder', 'reorder-override', 'reorder-override-drop', 'reorder-content']) {
     result.stage = mode;
-    process.env.PI_RECOVERY_TOOL_CASE = mode; process.env.PI_RECOVERY_REORDER = '';
+    process.env.PI_RECOVERY_TOOL_CASE = mode; process.env.PI_RECOVERY_REORDER = ''; process.env.PI_RECOVERY_PROMPT_UPDATE = '';
     process.env.PI_RECOVERY_SESSION = join(evidence, mode + '.jsonl');
     writeFileSync(process.env.PI_RECOVERY_SESSION, JSON.stringify({ type: 'session', version: 3, id: randomUUID(), timestamp: new Date().toISOString(), cwd: project }) + '\n');
     const offset = records().length, current = () => records().slice(offset), effects = () => current().filter(row => row.type === 'execution').map(row => row.label);
     await start();
+    if (mode.startsWith('prompt-')) {
+      assert.equal((await send('seed')).stopReason, 'stop');
+      if (mode === 'prompt-reload') {
+        await worker.close(); worker = undefined;
+        process.env.PI_RECOVERY_PROMPT_UPDATE = '1'; await start();
+      } else await worker.request('prompt', { message: '/sdk-change-prompt' });
+      const response = await send('followup');
+      assert.equal(response.stopReason, 'stop', response.errorMessage);
+      const queries = current().filter(row => row.type === 'query');
+      assert.equal(queries.length, 2);
+      assert.equal(queries[1].resumed, false); assert.equal(queries[1].resumedAt, false);
+      assert.match(queries[1].sdkSystemPrompt.append, /UPDATED_RULES/);
+      assert.match(queries[1].sdkSystemPrompt.append, /UPDATED_MCP_ROUTING/);
+      assert(current().some(row => row.type === 'prompt' && row.marker));
+      assert.equal((await send('followup')).stopReason, 'stop');
+      assert.deepEqual(effects(), ['seed']);
+      assert.equal(current().filter(row => row.type === 'query').length, 2);
+      await worker.close(); worker = undefined; process.env.PI_RECOVERY_PROMPT_UPDATE = '1'; await start();
+      assert.equal((await send('followup')).stopReason, 'stop');
+      assert.equal(current().filter(row => row.type === 'query').at(-1).resumed, true);
+      assert.deepEqual(effects(), ['seed']);
+      result.cases.push({ mode, pass: true, freshContext: true, instructionsPreserved: true, durableResume: true, noReplay: true });
+      await worker.close(); worker = undefined; continue;
+    }
     if (mode.startsWith('reorder')) {
       assert.equal((await send('seed')).stopReason, 'stop');
       const context = () => convertToLlm(buildSessionProjection(entries().slice(1)).entries.flatMap(row => row.messages));
@@ -55,12 +79,13 @@ try {
       const response = await send('followup'), currentContext = context();
       assert.deepEqual(getCurrentTools(currentContext), getCurrentTools(previous));
       assert.notEqual(getCurrentSystemMessage(currentContext).sections.tools, getCurrentSystemMessage(previous).sections.tools);
-      const blocked = mode !== 'reorder';
-      assert.equal(response.stopReason, blocked ? 'error' : 'stop', response.errorMessage);
+      assert.equal(response.stopReason, 'stop', response.errorMessage);
       assert.deepEqual(effects(), ['seed']);
-      const queries = current().filter(row => row.type === 'query'); assert.equal(queries.length, blocked ? 1 : 2);
-      if (blocked) assert.match(response.errorMessage, /environment, or output limit changed/); else assert.equal(queries[1].resumed, false);
-      result.cases.push({ mode, pass: true, declarationsUnchanged: true, freshContext: !blocked, blocked, noReplay: true });
+      const queries = current().filter(row => row.type === 'query'); assert.equal(queries.length, 2);
+      assert.equal(queries[1].resumed, false);
+      assert.equal(queries[1].sdkSystemPrompt.append.includes('OPERATOR_TOOL_POLICY_1'), mode === 'reorder-override');
+      assert.equal(queries[1].sdkSystemPrompt.append.includes('CHANGED_TOOL_INSTRUCTION'), mode === 'reorder-content');
+      result.cases.push({ mode, pass: true, declarationsUnchanged: true, freshContext: true, noReplay: true });
       await worker.close(); worker = undefined; continue;
     }
     const seeded = ['checkpoint', 'old-guard'].includes(mode);
@@ -72,7 +97,7 @@ try {
       await start();
       response = await send('dynamic-tools');
     }
-    const blocked = ['environment', 'instructions', 'missing-result', 'history'].includes(mode);
+    const blocked = ['environment', 'missing-result', 'history'].includes(mode);
     assert.equal(response.stopReason, blocked ? 'error' : 'stop', response.errorMessage);
     assert(current().find(row => row.type === 'selection').active.includes('extra'));
     const denied = ['permission', 'validation'].includes(mode);
@@ -82,6 +107,7 @@ try {
       assert.equal(queries.length, 1, 'Unsafe change must not start another SDK query.');
       assert.match(response.errorMessage, mode === 'missing-result' ? /exactly one Pi result/ : mode === 'history' ? /history changed/ : /environment, or output limit changed/);
     } else {
+      if (mode === 'instructions') assert.match(queries[1].sdkSystemPrompt.append, /PROTECTED_DYNAMIC_POLICY/);
       const capability = current().find(row => row.type === 'dynamic-tools');
       assert(capability.allowed && capability.listed.includes('extra'));
       assert.equal(queries.length, 2);

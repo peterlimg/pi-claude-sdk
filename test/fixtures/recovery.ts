@@ -62,8 +62,8 @@ function replayQuery(args) {
       const content = next.value.message.content;
       const text = content.filter(block => block.type === 'text').map(block => block.text).join('');
       let request = content.filter(block => block.type === 'text').at(-1)?.text ?? '';
-      const continuation = text.includes('Pi tool-set update.') && request.startsWith('Continue the user request');
-      if (continuation || tools.includes('mcp__pi__extra') && ((text.includes('Pi tool-set update.') && text.includes('"text":"dynamic-tools"')) ||
+      const continuation = text.includes('Pi instructions or tool-set update.') && request.startsWith('Continue the user request');
+      if (continuation || tools.includes('mcp__pi__extra') && ((text.includes('Pi instructions or tool-set update.') && text.includes('"text":"dynamic-tools"')) ||
         (text.includes('Pi-authorized context compaction.') && text.includes('"label":"dynamic-tools"')))) request = 'dynamic-tools';
       const retryCase = process.env.PI_RECOVERY_RETRY_CASE;
       if (retryCase && request.startsWith('Continue the pending user request')) request = 'sdk-fail';
@@ -73,7 +73,7 @@ function replayQuery(args) {
         marker: text.includes(process.env.PI_RECOVERY_MARKER!), unknown: text.includes('Execution outcome unknown'),
         leakedSignature: text.includes('RECOVERY_PRIVATE_SIGNATURE'), images: content.filter(block => block.type === 'image').length,
         providerRejection: text.includes('"providerRejected":true'), foreignFailure: text.includes('"provider":"recovery-control"') && text.includes('"stopReason":"error"'),
-        cancelled: text.includes('User-cancelled SDK continuation.'), toolUpdate: text.includes('Pi tool-set update.'), continuation,
+        cancelled: text.includes('User-cancelled SDK continuation.'), toolUpdate: text.includes('Pi instructions or tool-set update.'), continuation,
         notices: ['NOTICE_A', 'NOTICE_B', 'NOTICE_C'].filter(marker => text.includes(marker)),
         noticeOrder: ['NOTICE_A', 'NOTICE_B', 'NOTICE_C'].map(marker => text.indexOf(marker)) });
       yield { type: 'system', subtype: 'init', session_id: invalidInit ? randomUUID() : session, tools, apiKeySource: 'none' };
@@ -278,6 +278,7 @@ export default function (pi) {
   const recordNotices = () => {
     for (const marker of ['NOTICE_A', 'NOTICE_B', 'NOTICE_C']) pi.sendMessage({ customType: 'synthetic-child-notify', content: marker, display: true }, { triggerTurn: false });
   };
+  pi.registerCommand('sdk-change-prompt', { description: 'Update structured instructions', handler: async () => { process.env.PI_RECOVERY_PROMPT_UPDATE = '1'; } });
   pi.registerCommand('sdk-record-notices', { description: 'Record synthetic notices without starting a turn', handler: async () => recordNotices() });
   pi.registerCommand('sdk-fork-at', { description: 'Exercise Pi branching at an exact entry', handler: async (id, ctx) => {
     await ctx.fork(id.trim(), { position: 'at' });
@@ -305,6 +306,10 @@ export default function (pi) {
     event.systemPromptOptions.promptGuidelines.push('PORTABLE_GUIDELINE');
     event.systemPromptOptions.toolGuidelines.probe = ['PORTABLE_TOOL_GUIDE'];
     event.systemPromptOptions.sections.late_policy = 'PORTABLE_LATE_POLICY';
+    if (process.env.PI_RECOVERY_PROMPT_UPDATE === '1') {
+      event.systemPromptOptions.promptGuidelines.push('UPDATED_RULES');
+      event.systemPromptOptions.sections.mcp_servers = 'UPDATED_MCP_ROUTING';
+    }
     if (process.env.PI_RECOVERY_DOC_OVERRIDE === '1') event.systemPromptOptions.sections.docs = 'PORTABLE_DOC_OVERRIDE';
   });
   if (process.env.PI_RECOVERY_PROMPT_CASE) pi.on('before_agent_start', event => {

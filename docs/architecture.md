@@ -21,7 +21,7 @@ Prompt projection uses the official `claude_code` preset. Only proven generated 
 
 ## History and native contexts
 
-Pi owns the audit history. The native SDK context is separate and may be replaced only through a validated transition. Configuration fingerprints bind the canonical and projected prompts, tool schemas, working directory, Pi owner, explicit environment and output limit.
+Pi owns the audit history. The native SDK context is separate and may be replaced only through a validated transition. Configuration fingerprints bind the canonical and projected prompts, tool schemas, working directory, Pi owner, explicit environment and output limit. Changes to Pi's structured instructions or tools rebuild the native context after verifying the previous fingerprint and matching all pending results. The new context receives the current instructions and recorded history as data, without replaying tools.
 
 Completed turns save provider-owned checkpoint entries. Pi-owned compaction and independent clone/fork/tree transitions bind their source, destination and configuration through receipts before the next native checkpoint. Historical calls are imported as labeled data, never executable calls. History selection does not reverse filesystem effects.
 
@@ -37,7 +37,7 @@ Fresh borrowed foreground children use independent ephemeral bridges, not parent
 
 Borrowed foreground children do not save child-owned durable SDK checkpoints. Loading child hooks in an experiment can save a checkpoint, but changed foreground/background instructions still block retained continuation. Forced-foreground append-mode delegates also lack child-owned prompt-projection provenance. Do not globally enable child hooks or drop instructions to bypass either guard.
 
-General instruction/environment/output-limit changes, unknown SDK work, corrupt receipts and incomplete tool histories stay guarded. Child-local lifecycle, broader nested/custom roles and full provider parity need separate evidence. Keep current limitations in the [canonical tracker](https://github.com/peterlimg/pi-remote/blob/main/docs/provider-gaps.md), not a second list in this repository.
+Unproven whole-prompt overrides, environment/output-limit changes, unknown SDK work, corrupt receipts and incomplete tool histories stay guarded. Child-local lifecycle, broader nested/custom roles and full provider parity need separate evidence. Keep current limitations in the [canonical tracker](https://github.com/peterlimg/pi-remote/blob/main/docs/provider-gaps.md), not a second list in this repository.
 
 ## Authentication and usage
 

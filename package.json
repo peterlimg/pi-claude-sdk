@@ -1,6 +1,6 @@
 {
   "name": "pi-claude-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Claude Agent SDK provider for Pi with Pi-owned tools, permissions and session history",
   "private": true,
   "license": "UNLICENSED",

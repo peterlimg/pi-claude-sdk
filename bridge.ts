@@ -81,8 +81,6 @@ function userContent(content: string | Message['content']): Exclude<SDKUserMessa
     : block.type === 'image' ? { type: 'image', source: { type: 'base64', data: block.data,
       media_type: block.mimeType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' } }
     : fail('Unsupported Claude SDK input block.'));
-  const text = blocks.filter(block => block.type === 'text').map(block => block.text).join('');
-  if (text.trimStart().startsWith('/')) fail('SDK slash commands are unsupported. Use Pi commands instead.');
   return blocks;
 }
 
@@ -366,6 +364,7 @@ function createNativeBridge(cwd: string, createQuery: typeof query, state: Bridg
   }
   function send(content: SDKUserMessage['message']['content']) {
     const uuid = randomUUID();
+    // Pi owns command expansion; paths and remaining slash text must reach the SDK literally.
     prompts.push({ type: 'user', session_id: '', parent_tool_use_id: null, uuid,
       client_composed: true, message: { role: 'user', content } });
     wake?.();

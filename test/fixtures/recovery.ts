@@ -67,7 +67,8 @@ function replayQuery(args) {
         (text.includes('Pi-authorized context compaction.') && text.includes('"label":"dynamic-tools"')))) request = 'dynamic-tools';
       const retryCase = process.env.PI_RECOVERY_RETRY_CASE;
       if (retryCase && request.startsWith('Continue the pending user request')) request = 'sdk-fail';
-      log({ type: 'prompt', session, recovered: text.includes('Operator-approved SDK context recovery'),
+      log({ type: 'prompt', session, request, clientComposed: next.value.client_composed === true,
+        recovered: text.includes('Operator-approved SDK context recovery'),
         failed: text.includes('Failed SDK continuation.'),
         foreign: text.includes('FOREIGN_DONE'), localRejection: text.includes('SDK history changed after recovery approval. Request recovery again.'),
         marker: text.includes(process.env.PI_RECOVERY_MARKER!), unknown: text.includes('Execution outcome unknown'),

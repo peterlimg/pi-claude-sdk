@@ -25,7 +25,7 @@ const result = { fixture: 'Real Pi prompt replacement hooks, provider, MCP and t
 let worker;
 console.log('Evidence: ' + evidence);
 try {
-  for (const mode of process.argv.slice(2).length ? process.argv.slice(2) : ['append', 'same', 'rewrite', 'prepend', 'append-override', 'append-explicit-docs', 'override-explicit-docs', 'late-change', 'custom', 'opaque']) {
+  for (const mode of process.argv.slice(2).length ? process.argv.slice(2) : ['append', 'same', 'rewrite', 'prepend', 'append-override', 'append-explicit-docs', 'override-explicit-docs', 'late-change', 'custom', 'opaque', 'paths']) {
     result.stage = mode;
     process.env.PI_RECOVERY_PROMPT_CASE = mode;
     process.env.PI_RECOVERY_SESSION = join(evidence, mode + '.jsonl');
@@ -36,9 +36,25 @@ try {
       ...(mode === 'custom' ? ['--system-prompt', 'PORTABLE_CUSTOM_PROMPT'] : [])] });
     let settled = false;
     worker.on('event', event => { if (event.type === 'agent_settled') settled = true; });
-    await worker.request('get_state'); await worker.request('prompt', { message: 'seed' });
-    const deadline = Date.now() + 12000;
-    while (!settled) { if (Date.now() > deadline) throw new Error('Prompt fixture did not settle.'); await delay(20); }
+    await worker.request('get_state');
+    const messages = mode === 'paths' ? [
+      '/var/folders/tq/7wm5dbm117qdyz056rryqv0r0000gn/T/pi-remote-icons-handoff-Lk2t3K/handoff.md check it and I want to design better animation set, give me some prototypes',
+      '/tmp/handoff.md', '/handoff.md\nCheck this file.', '/context explain this literal text',
+    ] : ['seed'];
+    for (const message of messages) {
+      settled = false;
+      await worker.request('prompt', { message });
+      const deadline = Date.now() + 12000;
+      while (!settled) { if (Date.now() > deadline) throw new Error('Prompt fixture did not settle.'); await delay(20); }
+      if (mode === 'paths') {
+        const { messages: history } = await worker.request('get_messages');
+        const reply = history.findLast(item => item.role === 'assistant');
+        assert.equal(reply.stopReason, 'stop', reply.errorMessage);
+        const input = records().findLast(row => row.type === 'prompt');
+        assert.equal(input.request, message, 'Leading-slash text must reach the SDK unchanged');
+        assert.equal(input.clientComposed, true, 'SDK command dispatch must stay disabled');
+      }
+    }
     const rows = readFileSync(process.env.PI_RECOVERY_SESSION, 'utf8').trim().split('\n').map(JSON.parse);
     const reply = rows.findLast(row => row.message?.role === 'assistant').message;
     const blocked = ['rewrite', 'prepend', 'append-explicit-docs', 'override-explicit-docs', 'late-change'].includes(mode);
@@ -55,7 +71,7 @@ try {
         if (mode === 'custom') assert.equal(query.customPrompt, true);
         if (mode === 'append-override') assert.equal(query.customDocs, true);
       }
-      assert.deepEqual(current.filter(row => row.type === 'execution').map(row => row.label), ['seed']);
+      assert.deepEqual(current.filter(row => row.type === 'execution').map(row => row.label), mode === 'paths' ? [] : ['seed']);
     }
     result.cases.push({ mode, pass: true, blocked, sdkQueries: queries.length });
     await worker.close(); worker = undefined;

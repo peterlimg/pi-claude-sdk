@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { createProvider, getCurrentSystemMessage, type ApiKeyAuth, type Message, type Model } from '@earendil-works/pi-ai';
 import { getBuiltinModels } from '@earendil-works/pi-ai/providers/all';
 import { buildSessionProjection, convertToLlm, SessionManager, type BeforeAgentStartEvent, type ExtensionAPI, type ExtensionContext, type SessionEntry } from '@earendil-works/pi-coding-agent';
-import { createBridge, prepareRecovery, sdkEnvironment, type RecoveryPlan } from './bridge.ts';
+import { createBridge, prepareRecovery, validateForeignCompaction, sdkEnvironment, type RecoveryPlan } from './bridge.ts';
 
 const exec = promisify(execFile);
 const providerId = 'claude-sdk';
@@ -32,7 +32,7 @@ export default function (pi: ExtensionAPI, createQuery?: Parameters<typeof creat
   let bridge: ReturnType<typeof createBridge> | undefined;
   let checkpoint: unknown;
   let recovery: RecoveryPlan | undefined;
-  let compaction: { entryId: string; state: unknown } | undefined, compacting = false;
+  let compaction: { entryId: string; state: unknown } | undefined, compacting: false | 'sdk' | 'foreign' = false;
   let clone: { entryId: string; state: unknown } | undefined;
   let tree: { entryId: string; sourceId: string | null; state: unknown } | undefined;
   let treePlan: { oldLeafId: string | null; sourceId: string | null; proof: ReturnType<typeof createBridge>; before: Message[] } | undefined;
@@ -296,8 +296,17 @@ export default function (pi: ExtensionAPI, createQuery?: Parameters<typeof creat
     try {
       if (!bridge) throw new Error('No SDK session.');
       bridge.prepareCompaction(projectionMessages(event.branchEntries, true));
-      compacting = true;
+      compacting = 'sdk';
     } catch (error) {
+      if (ctx.model?.provider && ctx.model.provider !== providerId) {
+        try {
+          validateForeignCompaction(projectionMessages(event.branchEntries, true));
+          compacting = 'foreign';
+          return;
+        } catch (validationError) {
+          console.error('[claude-sdk:compaction] Pi history rejected:', validationError);
+        }
+      }
       console.error('[claude-sdk:compaction] Preparation rejected:', error);
       ctx.ui.notify('Cannot compact SDK history safely. Finish or recover the interrupted turn first.', 'warning');
       return { cancel: true };
@@ -306,6 +315,7 @@ export default function (pi: ExtensionAPI, createQuery?: Parameters<typeof creat
   pi.on('session_compact_failed', () => { compacting = false; });
   pi.on('session_compact', (event, ctx) => {
     if (!compacting) return;
+    const foreign = compacting === 'foreign';
     compacting = false;
     try {
       const branch = ctx.sessionManager.getBranch();
@@ -313,11 +323,13 @@ export default function (pi: ExtensionAPI, createQuery?: Parameters<typeof creat
       const entry = branch.findLast(row => row.type === 'compaction');
       const end = entry ? branch.indexOf(entry) : -1;
       if (!bridge || !entry || entry.type !== 'compaction' || entry.summary !== event.compactionEntry.summary) throw new Error('No SDK compaction source.');
-      const state = bridge.prepareCompaction(projectionMessages(branch.slice(0, end), true), recoveryMessages(ctx));
+      // A summary without a validated receipt must never authorize SDK resume.
+      const state = foreign ? null : bridge.prepareCompaction(projectionMessages(branch.slice(0, end), true), recoveryMessages(ctx));
       const receipt = { entryId: entry.id, state };
       pi.appendEntry('claude-sdk-compaction', receipt);
       checkpoint = undefined; recovery = undefined; clone = undefined; tree = undefined; compaction = receipt;
       restore(ctx);
+      if (foreign) ctx.ui.notify('Compacted with the selected model. This chat can continue with non-SDK models; Claude SDK needs a new session.', 'info');
     } catch (error) {
       console.error('[claude-sdk:compaction] Checkpoint rejected:', error);
       const entry = ctx.sessionManager.getBranch().findLast(row => row.type === 'compaction');

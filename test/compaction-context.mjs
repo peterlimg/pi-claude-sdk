@@ -21,7 +21,7 @@ const text = response => response.content.filter(block => block.type === 'text')
 const result = { fixture: 'real Pi RPC/default compactor, projection, SDK provider, MCP and effects; external SDK replay only',
   piVersion: execFileSync(process.execPath, [cli, '--version'], { encoding: 'utf8' }).trim(), cases: [], pass: false };
 const modes = ['manual', 'checkpoint-gap', 'repeated', 'repeat-before-response', 'auto', 'auto-tools', 'summary-error', 'summary-stop', 'receipt-gap', 'source-tamper',
-  'projection-tamper', 'invalid-receipt', 'config-receipt', 'null-config', 'instructions', 'missing-result', 'unknown-error', 'away-no-checkpoint',
+  'projection-tamper', 'invalid-receipt', 'config-receipt', 'null-config', 'instructions', 'missing-result', 'unknown-error',
   'foreign-before', 'compact-away', 'foreign-after', 'notices', 'tools-after', 'cancel-after'];
 let worker, settled = 0;
 async function until(check, label) {
@@ -59,7 +59,7 @@ try {
     await start(); await send('seed'); if (mode !== 'auto') await send('ack');
     if (mode === 'auto-tools') await send('dynamic-tools');
     if (['foreign-before', 'compact-away'].includes(mode)) { await foreign(); if (mode === 'foreign-before') await sdk(); }
-    if (['missing-result', 'unknown-error', 'away-no-checkpoint'].includes(mode)) {
+    if (['missing-result', 'unknown-error'].includes(mode)) {
       await worker.close(); worker = undefined;
       const rows = entries();
       if (mode === 'missing-result') {
@@ -69,8 +69,8 @@ try {
         rows.push({ type: 'message', id: randomUUID(), parentId: rows.at(-1).id, timestamp: new Date().toISOString(), message: {
           ...previous, content: [{ type: 'text', text: errorMessage }], stopReason: 'error', errorMessage } });
       }
-      save(mode === 'away-no-checkpoint' ? rows.filter(row => row.customType !== 'claude-sdk-checkpoint') : rows);
-      await start(); if (mode === 'away-no-checkpoint') await foreign();
+      save(rows);
+      await start();
       const count = queries(); await assert.rejects(compact(), /cancelled/i);
       assert.equal(queries(), count); assert(!entries().some(row => row.type === 'compaction'));
       result.cases.push({ mode, pass: true, blockedBeforeSummary: true }); await worker.close(); worker = undefined; continue;

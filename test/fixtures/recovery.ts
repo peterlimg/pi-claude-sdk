@@ -87,6 +87,16 @@ function replayQuery(args) {
         if (compactionMode === 'summary-stop') await delay(30000, undefined, { signal: args.options.abortController.signal });
         if (compactionMode === 'notices') while (!existsSync(process.env.PI_RECOVERY_GATE!)) await delay(20, undefined, { signal: args.options.abortController.signal });
       }
+      if (request === 'compaction-rate-limit') {
+        const id = 'toolu_' + randomUUID(), input = { label: 'before-rate-limit' };
+        const pending = client.callTool({ name: 'probe', arguments: input, _meta: { 'claudecode/toolUseId': id } });
+        void pending.catch(() => {});
+        yield* assistant(args.options.model, [{ type: 'tool_use', id, name: 'mcp__pi__probe', input }], 'tool_use');
+        await pending;
+        yield { type: 'assistant', uuid: randomUUID(), error: 'rate_limit', parent_tool_use_id: null,
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Synthetic SDK rate limit.' }] } };
+        continue;
+      }
       if (piDocs || request === 'billing-rejection') {
         yield { type: 'assistant', uuid: randomUUID(), error: 'unknown', parent_tool_use_id: null,
           message: { role: 'assistant', content: [{ type: 'text', text: 'API Error: 400 Third-party apps now draw from extra usage, not plan limits. Ask your workspace admin to add more and keep going. SYNTHETIC_PRIVATE_DETAIL' }] } };
@@ -250,7 +260,7 @@ function replayQuery(args) {
 export default function (pi) {
   pi.on('project_trust', () => ({ trusted: 'yes' }));
   const { compat: _compat, ...metadata } = getBuiltinModels('anthropic').find(model => model.id === 'claude-haiku-5-5');
-  const controlStream = (model, context) => {
+  const controlStream = (model, context, options) => {
     if (model.provider === 'openai-codex') log({ type: 'sol-request' });
     const summary = Boolean(process.env.PI_RECOVERY_COMPACTION && getCurrentTools(context.messages).length === 0);
     const summaryMarker = summary && JSON.stringify(context.messages).match(/PI_COMPACTION_[a-f0-9-]+/)?.[0];
@@ -265,6 +275,16 @@ export default function (pi) {
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
     const stream = createAssistantMessageEventStream();
     stream.push({ type: 'start', partial: message });
+    if (summary && ['foreign-error', 'foreign-stop'].includes(process.env.PI_RECOVERY_COMPACTION!)) {
+      const fail = () => {
+        const aborted = options?.signal?.aborted;
+        const error = { ...message, content: [], stopReason: aborted ? 'aborted' : 'error', errorMessage: 'Synthetic foreign summary failure' };
+        stream.push({ type: 'error', reason: error.stopReason, error }); stream.end();
+      };
+      if (process.env.PI_RECOVERY_COMPACTION === 'foreign-error' || options?.signal?.aborted) fail();
+      else options?.signal?.addEventListener('abort', fail, { once: true });
+      return stream;
+    }
     if (foreignFailure) stream.push({ type: 'error', reason: 'error', error: message });
     else stream.push({ type: 'done', reason: message.stopReason, message });
     stream.end(); return stream;

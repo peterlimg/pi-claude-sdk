@@ -23,7 +23,9 @@
     "test:cancel": "node test/cancel.mjs",
     "test:tools": "node test/tools.mjs",
     "test:notices": "node test/notices.mjs",
-    "test:compaction": "node test/compaction-context.mjs",
+    "test:compaction": "node test/compaction-context.mjs && node test/foreign-compaction.mjs",
+    "test:foreign-compaction": "node test/foreign-compaction.mjs",
+    "verify:compaction": "node verification/compaction/check.mjs",
     "test:clone": "node test/clone.mjs",
     "test:fork": "node test/fork.mjs",
     "test:tree": "node test/tree.mjs"

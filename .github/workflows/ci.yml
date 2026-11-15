@@ -25,6 +25,10 @@ jobs:
       - run: npm test
         env:
           TMPDIR: ${{ runner.temp }}
+      - if: matrix.pi == '1.3.0'
+        run: npm run verify:compaction -- --self-test
+        env:
+          TMPDIR: ${{ runner.temp }}
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -33,3 +37,5 @@ jobs:
             ${{ runner.temp }}/pi-sdk-discovery-*/
             ${{ runner.temp }}/pi-sdk-*-e2e-*/
             ${{ runner.temp }}/pi-sdk-compaction-context-*/
+            ${{ runner.temp }}/pi-sdk-foreign-compaction-*/
+            ${{ runner.temp }}/pi-foreign-compaction-formal-*/

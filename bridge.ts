@@ -205,6 +205,12 @@ function historyContent(messages: Message[], knownIds: Set<string>, { interrupti
   return [{ type: 'text', text: header + JSON.stringify(rows) + '\nEnd of historical context. The current user message follows.\n' }, ...userContent(images)];
 }
 
+export function validateForeignCompaction(messages: Message[]): void {
+  const history = messages.filter(message => message.role !== 'system');
+  // Summarizing Pi records does not approve SDK resume or waive missing tool results.
+  historyContent(history, new Set(), { handoff: 'compaction', trustedPrefix: history.length, completedPrefix: 0 });
+}
+
 export function prepareRecovery(checkpoint: unknown, messages: Message[]): RecoveryPlan {
   const saved = checkpointSchema.safeParse(checkpoint).data;
   if (!saved) fail('SDK recovery requires a valid completed checkpoint.');
